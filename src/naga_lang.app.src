@@ -1,0 +1,9 @@
+{application, naga_lang, [
+    {description,  "Naga Translation Service."},
+    {vsn,          "0.1.0"},
+    {applications, [kernel, stdlib]},
+    {modules, []},
+    {registered,   []},
+    {mod, { naga_lang_app,   []}},
+    {env, []}
+]}.
