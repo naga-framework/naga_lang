@@ -12,7 +12,8 @@
          lookup/2,
          language_list/1,
          update_po/1,
-         extract_dtl/1
+         extract_dtl/1,
+         base_dir/1
          ]).
 
 -record(state,{tables}).
@@ -48,7 +49,27 @@ handle_call(_, _, State) ->  {reply, ok, State}.
 env(A,K)           -> application:get_env(A,K,[]).
 env(A,K,D)         -> application:get_env(A,K,D).
 table(App)         -> list_to_atom(atom_to_list(App) ++ "_translations").
-lang_dir(A)        -> env(A,lang_dir).
+%FIXME case window?
+lang_dir(A)        -> case env(A,lang_dir) of
+                        Dir -> case Dir of 
+                                "./" ++ Rest -> absolute(A,Rest);
+                                "/" ++ _ -> Dir;
+                                Dir -> absolute(A,Dir) end end.
+base_dir(A)        -> case code:priv_dir(A) of
+                        {error, _} -> {ok, Cwd} = file:get_cwd(),
+                                      {B,D} = lists:foldr(fun(_,{true,P}) -> {true, P};
+                                                             (X,{false,Acc}) ->
+                                                                P = filename:join([Cwd,X,wf:to_list(A)]),
+                                                                {filelib:is_dir(P), P}
+                                                          end,{false,[]},["apps","deps"]),
+                                      case B of true -> D;_-> {error, not_found} end;
+                        D -> filename:join(lists:reverse(lists:reverse(filename:split(D)) -- ["priv"])) 
+                      end.                                              
+absolute(A,D)      -> case lists:prefix("priv",D) of
+                        true -> filename:join(base_dir(A),D);
+                        false -> filename:join(code:priv_dir(A),D)
+                      end.
+
 lang_file(A,L)     -> Dir = lang_dir(A),
                       Name = "strings." ++ L ++ ".po",
                       filename:join(Dir,Name).
