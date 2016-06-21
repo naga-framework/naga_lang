@@ -12,14 +12,18 @@
          lookup/2,
          language_list/1,
          update_po/1,
+         extract_strings/1,
+         extract_strings/2,
          extract_dtl/1,
-         base_dir/1
+         base_dir/1,
+         lang_write_to_file/3
          ]).
 
 -record(state,{tables}).
 
 %% ---- server %%
-init(_)             -> {ok, #state{}}.
+init(_)             -> Apps = env(?MODULE,applications), 
+                       {ok, #state{tables=new(Apps)}}.
 start_link()        -> start_link([]).
 start_link(Args)    -> gen_server:start_link({local, ?SERVER}, ?MODULE, Args, []).
 handle_cast(_, S)   -> {noreply, S}.
@@ -30,21 +34,22 @@ code_change(_, S, _)-> {ok, S}.
 
 handle_call({new, App}, _From, #state{tables=Tables}=State) -> 
     case proplists:get_value(App, Tables) of
-        undefined -> 
-            TableName = table(App),
-            TableName = ets:new(TableName,[set, named_table, public, {read_concurrency, true}]),
-            %error_logger:info("Translation Tables ~p created for ~p application~n",[TableName,App]),
-            case language_list(App) of 
-                [] -> ok;
-                _ -> load_table(App) end,            
-            NewTables = [{App,TableName}|Tables],
-            {reply, {ok, TableName}, State#state{tables=NewTables}};
+        undefined -> {App,TableName} = new(App),
+            {reply, {ok, TableName}, State#state{tables=[{App,TableName}|Tables]}};
         Table ->
             {reply, {ok, Table}, State}
-    end;
+    end;   
 handle_call(_, _, State) ->  {reply, ok, State}.
 
-
+new(Apps) 
+ when is_list(Apps)-> [new(A)||A<-Apps]; 
+new(App) 
+ when is_atom(App) -> TableName = table(App),
+                      TableName = ets:new(TableName,[set, named_table, public, {read_concurrency, true}]),
+                      %error_logger:info("Translation Tables ~p created for ~p application~n",[TableName,App]),
+                      case language_list(App) of [] -> ok;
+                            _ -> load_table(App) end,            
+                      {App,TableName}.
 
 env(A,K)           -> application:get_env(A,K,[]).
 env(A,K,D)         -> application:get_env(A,K,D).
@@ -69,7 +74,7 @@ absolute(A,D)      -> case lists:prefix("priv",D) of
                         true -> filename:join(base_dir(A),D);
                         false -> filename:join(code:priv_dir(A),D)
                       end.
-
+   
 lang_file(A,L)     -> Dir = lang_dir(A),
                       Name = "strings." ++ L ++ ".po",
                       filename:join(Dir,Name).
@@ -79,7 +84,7 @@ create_lang(A,L)   -> File = lang_file(A,L),
                       file:close(IO).
 
 delete_lang(A,L)   -> File=lang_file(A,L), 
-                      ok=file:delete(File).
+                      file:delete(File).
 
 lookup(A,{L,K})    -> case ets:lookup(table(A), {K, L}) of
                            [] -> undefined;[{_, Trans}] ->  Trans end.
@@ -94,18 +99,18 @@ language_list(App) -> Match = filename:join(lang_dir(App), "*.po"),
 update_po(App)     -> Fun = fun(X) -> update_po(App, X, all, []) end,
                       lists:map(Fun, language_list(App)).
 
-
 language_list(_,[],Acc) -> Acc;
 language_list(App, [F|T], Acc ) -> 
     case filename:basename(F, ".po") of
         "strings." ++ Lang -> language_list(App, T, [Lang|Acc]);
         _ -> language_list(App, T, Acc) end.            
 
-
 load_table(TableName, App, Lang) ->
     {Untranslated, Translated} = extract_strings(App, Lang),
     lists:map(fun({O, T}) ->
                       Tr = case T of [] -> undefined; _-> T end,
+                      %FIXME print O unicode
+                      %io:format("ETS:INSERT ~p:[~s] ~ts -> ~s~n",[TableName, Lang, O, Tr]),
                       ets:insert(TableName, {{O, Lang}, Tr})
               end, Translated).
 
@@ -178,7 +183,7 @@ extract_strings(App, Lang) ->
     PoStrings  = extract_po_strings(App, Lang),
     Fun = fun(S) -> case proplists:get_value(S, PoStrings) of
                          undefined -> true;_ -> false end end,
-    Untranslated = lists:filter(Fun, lists:usort(AllStrings)),       
+    Untranslated = lists:filter(Fun, lists:usort(AllStrings)),         
     {Untranslated, PoStrings}.
 
 extract_po_strings(App, Lang) ->
