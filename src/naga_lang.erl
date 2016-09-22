@@ -22,15 +22,14 @@
 -record(state,{tables}).
 
 %% ---- server %%
-init(_)             -> Apps = env(?MODULE,applications), 
-                       {ok, #state{tables=new(Apps)}}.
+init(_)             -> %Apps = env(?MODULE,applications), 
+                       {ok, #state{tables=[]}}.
 start_link()        -> start_link([]).
 start_link(Args)    -> gen_server:start_link({local, ?SERVER}, ?MODULE, Args, []).
 handle_cast(_, S)   -> {noreply, S}.
 handle_info(_, S)   -> {noreply, S}.
 terminate(_, _)     -> ok.
 code_change(_, S, _)-> {ok, S}.
-
 
 handle_call({new, App}, _From, #state{tables=Tables}=State) -> 
     case proplists:get_value(App, Tables) of
@@ -86,7 +85,8 @@ create_lang(A,L)   -> File = lang_file(A,L),
 delete_lang(A,L)   -> File=lang_file(A,L), 
                       file:delete(File).
 
-lookup(A,{L,K})    -> case ets:lookup(table(A), {K, L}) of
+lookup(A,{L,K})    -> %io:format("ETS:LOOKUP ~p:[~p] ~ts~n",[A, L, K]),
+                      case ets:lookup(table(A), {K, L}) of
                            [] -> undefined;[{_, Trans}] ->  Trans end.
 
 load_table(App)    -> FunLoad = fun(X) -> load_table(table(App), App, X) end,
@@ -199,8 +199,9 @@ process_po_tokens([{id, MsgId}, {str, MsgStr}|Rest], Acc) ->
 process_po_tokens([_|Rest], Acc) ->
     process_po_tokens(Rest, Acc).
 
-extract_module_strings(App) ->
-    {ok, Modules} = application:get_key(App,modules), 
+extract_module_strings(App) -> extract_module_strings(App, application:get_key(App,modules)).
+extract_module_strings(App, undefined) -> error_logger:error_msg("please verify if ~p is started.",[App]),[];
+extract_module_strings(App, {ok, Modules}) ->
     lists:foldl(fun(M, Acc) ->                                 
                         case lists:keysearch(translatable_strings, 1, M:module_info(exports)) of
                             {value, {translatable_strings, 0}} -> 
